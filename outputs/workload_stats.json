@@ -1,0 +1,25 @@
+{
+  "_note": "Phase-1 documented stats transcribed from the plan (section 2), pending the live trace parser. Source: Inferact/codex_swebenchpro_traces (610 successful SWEBenchPro trials, Codex agent).",
+  "source": "Inferact/codex_swebenchpro_traces",
+  "n_trials": 610,
+  "stats": {
+    "llm_calls_per_trial":          {"mean": 33,     "p50": 30,     "p90": 57,      "p99": 90},
+    "input_tokens_per_call":        {"mean": 68329,  "p50": 63917,  "p90": 114888,  "p99": 166322},
+    "cached_tokens_per_call":       {"mean": 64338,  "p50": 60928,  "p90": 112512,  "p99": 162048},
+    "computed_uncached_per_call":   {"mean": 3991,   "p50": 758,    "p90": 8736,    "p99": 53323},
+    "output_tokens_per_call":       {"mean": 520,    "p50": 246,    "p90": 1133,    "p99": 4845},
+    "inter_call_delay_s":           {"mean": 10.5,   "p50": 5.2,    "p90": 23.0,    "p99": 81.4}
+  },
+  "derived": {
+    "input_output_ratio": 131.4,
+    "cache_hit_rate": 0.942,
+    "uncached_fraction": 0.058,
+    "regime": "prefill-dominated, long-context, high cache hit, long idle gaps"
+  },
+  "workload_presets_for_model": {
+    "mean": {"s_cached": 64338, "a_append": 3991, "o_output": 520,  "t_idle": 10.5},
+    "p50":  {"s_cached": 60928, "a_append": 758,  "o_output": 246,  "t_idle": 5.2},
+    "p90":  {"s_cached": 112512,"a_append": 8736, "o_output": 1133, "t_idle": 23.0},
+    "p99":  {"s_cached": 162048,"a_append": 53323,"o_output": 4845, "t_idle": 81.4}
+  }
+}

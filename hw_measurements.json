@@ -1,0 +1,26 @@
+[
+  {
+    "_comment": "Llama-3.1-8B (32L, hidden 4096, 32 q-heads, 8 kv-heads, hd 128, 8B params) on a single H100-SXM (80GB, 3.35 TB/s HBM3). Single-request / low-concurrency inter-token latency ~11ms reported across vLLM/TensorRT-LLM benchmarks. Source: NVIDIA TensorRT-LLM + vLLM H100 benchmarks (see outputs/validation_vs_hardware.md). APPROXIMATE literature-derived anchor, bf16, short context.",
+    "name": "llama8b_h100_b1_ctx1k",
+    "model": {"name": "llama3_8b", "layers": 32, "hidden": 4096, "n_heads": 32,
+              "n_kv_heads": 8, "head_dim": 128, "p_act": 8e9, "p_total": 8e9},
+    "hw": {"gpu_flops": 9.9e14, "hbm_bw_tb_s": 3.35, "hbm_capacity_gb": 80},
+    "b_d": 1, "context_tokens": 1024, "measured_tpot_ms": 11.0
+  },
+  {
+    "_comment": "Same model/HW, higher concurrency end of the reported single-stream ITL band (~21ms) -> larger effective decode batch. Source as above.",
+    "name": "llama8b_h100_b32_ctx1k",
+    "model": {"name": "llama3_8b", "layers": 32, "hidden": 4096, "n_heads": 32,
+              "n_kv_heads": 8, "head_dim": 128, "p_act": 8e9, "p_total": 8e9},
+    "hw": {"gpu_flops": 9.9e14, "hbm_bw_tb_s": 3.35, "hbm_capacity_gb": 80},
+    "b_d": 32, "context_tokens": 1024, "measured_tpot_ms": 21.0
+  },
+  {
+    "_comment": "Llama-3.1-8B on H100, longer 8k context, single stream. ITL rises modestly with context (more KV to stream). Estimated ~13ms from the same benchmark family. APPROXIMATE.",
+    "name": "llama8b_h100_b1_ctx8k",
+    "model": {"name": "llama3_8b", "layers": 32, "hidden": 4096, "n_heads": 32,
+              "n_kv_heads": 8, "head_dim": 128, "p_act": 8e9, "p_total": 8e9},
+    "hw": {"gpu_flops": 9.9e14, "hbm_bw_tb_s": 3.35, "hbm_capacity_gb": 80},
+    "b_d": 1, "context_tokens": 8192, "measured_tpot_ms": 13.0
+  }
+]
