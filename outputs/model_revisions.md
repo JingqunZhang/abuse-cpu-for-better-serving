@@ -196,3 +196,42 @@ Tests: 72/72 after the round (one test rewritten to the corrected physics, no
 new regressions). Verified-correct and explicitly NOT changed: `d_attn` FLOP
 factor, MoE `1−(1−ρ)^B` weight coverage, `1/(1−f)` capacity coupling, `_combine`
 overlap interpolation, band ordering, MLA-KV preset.
+
+---
+
+# Honesty revision (round 2 — three adversarial multi-agent audits)
+
+Triggered by the question "is the model rigged to make CPU core-attention offload
+look good?" Three independent 17-agent audits (8 dimensions, each cross-verified by
+a second skeptic, all re-running the code) moved the verdict
+**mildly-optimistic → honest → mildly-pessimistic** (it now errs slightly *against*
+offload). Fixes applied:
+
+1. **Default overlap `optimistic` → `conservative`** (`serving_mix`, `best_f`,
+   `validate`). A bare call now returns the bankable no-overlap floor, never the
+   rosiest bound. Report the BAND or a `fit_overlap`-calibrated ov.
+2. **Apples-to-apples sparsity.** `sparse` now scales the GPU baseline's
+   decode-attention read/FLOPs too (`concurrent._class_demand`/`_decode_tpot` and
+   `analytical.gpu_attn_time`), not just the offloaded CPU path. The sparse-row
+   optimistic gain dropped 1.99×→**1.69×** (the ~1.17× difference was a sparsity
+   benefit previously denied to the baseline).
+3. **CPU-DRAM capacity guard.** `serving_mix` now bounds the batch by CPU memory
+   (`per_seq_cpu_max ≤ m_cpu`, `b_cap ≤ m_cpu/per_seq_cpu`) and flags
+   `cpu_capacity_oom` — mirrors `disagg.py`. Stops offload placing unbounded KV on
+   the CPU "for free" (fixed an inflated ~3.5× at S=128k → ~2.8×).
+4. **eta disclosure.** Headline `eta=0.5`; hardware-fit ≈0.40 where the dense
+   single-GPU baseline is SLO-infeasible — disclosed in the report. Removed the
+   physically-mislabeled b32/21ms calibration anchor (`_skip`); clean LOO 11.2%.
+5. **C2C old-KV/new-KV charged** in `concurrent.py` (was decode-Q/O only) — small,
+   never binds, asymmetric (baseline pays 0), now accounted not dropped.
+6. **`gain@opt` magnitude tests + headline-path roofline floor.** New tests pin
+   the optimistic gain and assert `_decode_tpot` ≥ the physical HBM/CPU floor — the
+   audit's load-bearing gap (a CPU-cost undercount could inflate `gain@opt`
+   undetected). Plus `su_min` → aggregate `min`, f-grid → 1.0, prose corrected,
+   docstring (`1/max` is optimistic; default is `1/sum`).
+
+Tests: **81/81**. Kept GiB for `m_hbm`/`m_cpu` (vs decimal GB in `system()`) as the
+conservative choice (slightly understates offload) rather than destabilize the
+superseded decode-only analytical path. Honest gain stands: dense ≈1.0× bankable /
+≈1.05× optimistic; sparse ≈1.0× bankable / ≈1.7× optimistic; quantization often
+beats offload.

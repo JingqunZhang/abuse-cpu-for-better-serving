@@ -84,23 +84,28 @@ def _gain_curve(sparse, b_d=256):
     return fs, out
 
 
-def test_dense_cpu_attention_never_helps_throughput():
-    """With dense CPU attention the ~16x CPU/HBM bandwidth gap dominates: any
-    f>0 lowers throughput (offload only buys HBM capacity, not TPS)."""
+def test_dense_cpu_attention_helps_only_modestly():
+    """With the realistic Grace f_cpu (DRAM-bound CPU attention, not the old
+    too-low compute-bound 2 TFLOP/s), dense CPU offload CAN help a little via freed
+    HBM capacity, but only modestly -- the ~16x CPU/HBM bandwidth gap still caps it
+    well below the sparse case. (Old claim 'dense never helps' was an artifact of
+    the too-weak f_cpu.)"""
     fs, gains = _gain_curve(sparse=1.0)
     assert gains[0] == 1.0
-    assert all(g <= 1.0 + 1e-9 for g in gains[1:]), gains
+    assert max(gains) <= 1.35, gains        # modest, bandwidth-gap-capped
 
 
-def test_sparse_cpu_attention_can_beat_baseline():
-    """ScoutAttention-style sparse CPU attention (10% blocks) lets offload
-    exceed baseline throughput at some f -- the regime where CPU helps."""
+def test_sparse_cpu_attention_beats_baseline_and_dense():
+    """ScoutAttention-style sparse CPU attention (10% blocks) lets offload exceed
+    baseline throughput, and its BEST f beats dense's best (sparse is the regime
+    where CPU offload really helps)."""
     fs, gains = _gain_curve(sparse=0.1)
     assert gains[0] == 1.0
     assert max(gains) > 1.05, gains
-    # and the win grows with sparsity: sparse beats dense everywhere f>0.
+    # sparse's best operating point beats dense's best (not necessarily pointwise,
+    # since with a realistic CPU dense can win at a different f than sparse).
     _, dense = _gain_curve(sparse=1.0)
-    assert all(s >= d - 1e-9 for s, d in zip(gains, dense)), (gains, dense)
+    assert max(gains) > max(dense) + 1e-9, (gains, dense)
 
 
 def test_hbm_capacity_monotonic_in_f():

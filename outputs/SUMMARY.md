@@ -17,12 +17,18 @@ validated against the real Codex/SWEBenchPro trace and 7 systems papers.
 > (1) the **real "no-help" boundary is COMPUTE-bound, not short-context** — offload
 > helps whenever GPU HBM binds (even short context, via weight-amortization), and
 > does nothing only when GPU compute binds; (2) once **CPU attention compute** is
-> counted (~L·S·d_attn/token, compute-bound on a weak CPU), the perfect-overlap
-> gains are **~1.05× dense / ~2.0× sparse-10% on a 1-Grace GB200 @50 ms TPOT**, and
-> **≈1.0× with no overlap** — the offload win *lives or dies by CPU/GPU overlap*
-> (high `ov`) **or** a loose latency budget. Two independent soundness-review
-> passes; 72/72 tests. The phase-by-phase findings below remain valid in direction;
-> these are the corrected, current magnitudes.
+> counted (~L·S·d_attn/token, compute-bound on a weak CPU), the **bankable
+> (no-overlap) gain is ≈1.0–1.1×** and the **perfect-overlap gain is ~1.18× dense /
+> ~2.5× sparse-10% on a 1-Grace GB200 @50 ms TPOT** (at the realistic Grace bf16
+> peak f_cpu≈14 TF — an upper bound; irregular sparse kernels realize less) — the offload win *lives or
+> dies by CPU/GPU overlap* (high `ov`) **or** (a loose latency budget **and**
+> sparsity **and** ≥~2 Grace/GPU). The reported default is the conservative floor,
+> not the optimistic end; `sparse` is applied to the GPU baseline too
+> (apples-to-apples), so the gain isolates the offload effect. Three rounds of
+> adversarial multi-agent audit moved the verdict mildly-optimistic → honest →
+> mildly-pessimistic (i.e. it now errs slightly *against* offload); 81/81 tests.
+> The phase-by-phase findings below remain valid in direction; these are the
+> corrected, current magnitudes.
 
 ## What was built
 - **Closed-form analytical model** (`model/analytical.py`): KV/HBM/CPU capacity,
@@ -64,8 +70,12 @@ validated against the real Codex/SWEBenchPro trace and 7 systems papers.
    aggregation at loose latency), *dense* CPU attention can win — we do not model
    or contradict that.
 
-4. **Under an interactive TPOT SLO, the optimum f\* is interior:** ~0.22–0.44 with
-   sparse attention (1.86–2.06× over the best GPU-only batch); ~0 with dense. The
+4. **Under an interactive TPOT SLO, the optimum f\* is interior — but only at the
+   optimistic end.** Bankable (no-overlap): f\*≈0, gain ≈1.0× (offloading the slow
+   CPU attention onto the critical path doesn't pay). With perfect overlap:
+   interior f\*~0.15–0.60 giving ~1.18× dense / ~2.5× sparse over the best GPU-only
+   batch (apples-to-apples — the GPU baseline gets the same sparsity, so this is
+   the offload effect alone, not a sparsity benefit denied to the baseline). The
    SLO is what creates the interior optimum (unconstrained f→1 just trades latency
    for batch).
 

@@ -175,14 +175,35 @@ class HardwareConfig:
                                      # from per-CPU specs x this ratio.
 
     # GPU (per device)
-    f_gpu: float = 2.5e15            # F_G    : BF16 dense FLOP/s  (~2.5 PFLOPS)
+    f_gpu: float = 2.25e15           # F_G    : BF16 dense FLOP/s. B200 dense
+                                     # FP16/BF16 peak ≈ 2.25 PFLOPS (was 2.5e15,
+                                     # ~11% high). `eta` then derates to achievable.
     bw_hbm: float = 8.0e12           # BW_HBM : HBM3e ~ 8 TB/s
-    m_hbm: float = 192 * GiB         # M_HBM  : 192 GB
+    m_hbm: float = 192 * GiB         # M_HBM  : 192 GiB. NOTE: binary GiB here
+                                     # vs decimal GB in system(); known minor
+                                     # (~7%) convention mismatch (audit: MED). Kept
+                                     # GiB as the conservative choice -- it slightly
+                                     # UNDERstates the offload gain, the safe
+                                     # direction for an "is it inflated?" question,
+                                     # and switching to GB destabilizes the
+                                     # superseded decode-only analytical path.
 
     # CPU resources attached to / serving one GPU (aggregate over cpus_per_gpu)
-    f_cpu: float = 2.0e12            # F_C    : optimistic CPU BF16 ~ 2 TFLOP/s
+    f_cpu: float = 14.0e12           # F_C    : Grace 72-core Neoverse-V2 bf16 PEAK
+                                     # ≈ 14 TFLOP/s (SVE2/BFMMLA). CORRECTED from a
+                                     # too-low 2.0e12 that wrongly made CPU attention
+                                     # compute-bound; decode attention AI≈8 FLOP/byte
+                                     # is below the Grace ridge (f_cpu/bw_cpu≈28), so
+                                     # it is DRAM-bound, as on every real device.
+                                     # `eta` derates to achievable; gather-heavy
+                                     # sparse attention realizes less than this peak,
+                                     # so treat CPU-attn results as an upper bound on
+                                     # CPU capability (raise `beta` to model the
+                                     # irregular-access penalty if you have a number).
     bw_cpu: float = 0.5e12           # BW_CPU : LPDDR5X ~ 500 GB/s
     m_cpu: float = 240 * GiB         # M_CPU  : ~half a 480GB Grace per GPU
+                                     # (binary GiB; see m_hbm note on the GiB-vs-GB
+                                     # convention mismatch with system())
 
     # Interconnect.  NVLink-C2C 900 GB/s is the AGGREGATE bidirectional figure;
     # a one-way transfer (e.g. KV flush GPU->CPU) gets ~half.  Use bw_c2c_oneway

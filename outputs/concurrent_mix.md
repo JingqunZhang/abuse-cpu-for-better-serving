@@ -4,48 +4,52 @@
 
 Fluid steady-state: prefill and decode of a MIX of workload classes contend CONCURRENTLY for GPU compute ∥ HBM bandwidth (continuous batching), plus CPU DRAM / C2C for the offloaded fraction f. Throughput = Lambda_max · mean(O); Lambda_max = 1/max_resource(Σ p·util-sec). dense-70B, eta=0.5.
 
+> **eta caveat (honesty).** This report uses eta=0.5 (achievable efficiency). Fitting the closed form to literature H100 ITL points yields a LOWER eta≈0.40 (see `validation_vs_hardware.md`). At eta≈0.40 the dense single-GPU long-context baseline is INFEASIBLE under the 50ms TPOT SLO (the weight-streaming floor alone exceeds it) — i.e. at the hardware-fitted efficiency you need tensor-parallel sharding (or a looser SLO) before offload is even on the table. So eta=0.5 is, if anything, the more offload-FAVORABLE choice; the gains below would be smaller, not larger, at the fitted eta.
+
 Generalizes the single-mean-call `serving_2res`: prefill/decode now share resources across a heterogeneous population, not serialized in one call.
 
 ## NVL72 stock (0.5 Grace), dense
-f=0 tok/s as a [conservative..optimistic] band (no-overlap..perfect overlap). **Offload gain shown for BOTH ends**: `gain@opt` (offload overlaps GPU) vs `gain@con` (no overlap, offloaded CPU attention on the latency path). SLO ≤ 50ms.
-| mix | f=0 [con..opt] | bind | B | TPOT | best f@opt | gain@opt | gain@con |
+f=0 tok/s as a [conservative..optimistic] band (no-overlap..perfect overlap). **The bankable number is `gain@con` (no overlap); `gain@opt` is the UPPER bound that REQUIRES a layer-ahead pipeline** — read it as upside, not as the result. `sparse` is applied to the GPU baseline too (apples-to-apples), so the gain isolates the offload effect, not a sparsity benefit denied to the baseline. SLO ≤ 50ms.
+| mix | f=0 [con..opt] | bind | B | TPOT | **gain@con (bankable)** | gain@opt (needs overlap) | best f@con/@opt |
 |---|---|---|---|---|---|---|---|
-| 100% long-agentic (Codex) | 47..53 | gpu_hbm | 2.7 | 50ms | 0.05 | 1.04x | 1.00x |
-| 70% long-agentic + 30% short-chat | 57..66 | gpu_hbm | 3.3 | 50ms | 0.05 | 1.04x | 1.00x |
-| 50% long + 30% mid-RAG + 20% short | 69..80 | gpu_hbm | 4.0 | 50ms | 0.05 | 1.04x | 1.00x |
-| 80% short-chat + 20% long (interactive-heavy) | 136..163 | gpu_hbm | 8.3 | 50ms | 0.05 | 1.04x | 1.00x |
-| 100% prefill-heavy (long in, tiny out) — compute-bound | 5..6 | gpu_compute | 2.3 | 50ms | 0.10 | 1.00x | 1.00x |
+| 100% long-agentic (Codex) | 46..53 | gpu_hbm | 2.6 | 50ms | **1.00x** | 1.05x | 0.00/0.05 |
+| 70% long-agentic + 30% short-chat | 56..66 | gpu_hbm | 3.1 | 50ms | **1.00x** | 1.05x | 0.00/0.05 |
+| 50% long + 30% mid-RAG + 20% short | 68..80 | gpu_hbm | 3.8 | 50ms | **1.00x** | 1.05x | 0.00/0.05 |
+| 80% short-chat + 20% long (interactive-heavy) | 133..163 | gpu_hbm | 7.6 | 50ms | **1.00x** | 1.06x | 0.00/0.10 |
+| 100% prefill-heavy (long in, tiny out) — compute-bound | 5..6 | gpu_compute | 2.2 | 50ms | **1.00x** | 1.00x | 0.00/0.20 |
 
 ## 1 Grace/GPU, dense
-f=0 tok/s as a [conservative..optimistic] band (no-overlap..perfect overlap). **Offload gain shown for BOTH ends**: `gain@opt` (offload overlaps GPU) vs `gain@con` (no overlap, offloaded CPU attention on the latency path). SLO ≤ 50ms.
-| mix | f=0 [con..opt] | bind | B | TPOT | best f@opt | gain@opt | gain@con |
+f=0 tok/s as a [conservative..optimistic] band (no-overlap..perfect overlap). **The bankable number is `gain@con` (no overlap); `gain@opt` is the UPPER bound that REQUIRES a layer-ahead pipeline** — read it as upside, not as the result. `sparse` is applied to the GPU baseline too (apples-to-apples), so the gain isolates the offload effect, not a sparsity benefit denied to the baseline. SLO ≤ 50ms.
+| mix | f=0 [con..opt] | bind | B | TPOT | **gain@con (bankable)** | gain@opt (needs overlap) | best f@con/@opt |
 |---|---|---|---|---|---|---|---|
-| 100% long-agentic (Codex) | 47..53 | gpu_hbm | 2.7 | 50ms | 0.05 | 1.05x | 1.00x |
-| 70% long-agentic + 30% short-chat | 57..66 | gpu_hbm | 3.3 | 50ms | 0.05 | 1.05x | 1.00x |
-| 50% long + 30% mid-RAG + 20% short | 69..80 | gpu_hbm | 4.0 | 50ms | 0.05 | 1.05x | 1.00x |
-| 80% short-chat + 20% long (interactive-heavy) | 136..163 | gpu_hbm | 8.3 | 50ms | 0.10 | 1.06x | 1.00x |
-| 100% prefill-heavy (long in, tiny out) — compute-bound | 5..6 | gpu_compute | 2.3 | 50ms | 0.20 | 1.00x | 1.00x |
+| 100% long-agentic (Codex) | 46..53 | gpu_hbm | 2.6 | 50ms | **1.00x** | 1.18x | 0.00/0.15 |
+| 70% long-agentic + 30% short-chat | 56..66 | gpu_hbm | 3.1 | 50ms | **1.00x** | 1.18x | 0.00/0.15 |
+| 50% long + 30% mid-RAG + 20% short | 68..80 | gpu_hbm | 3.8 | 50ms | **1.00x** | 1.18x | 0.00/0.15 |
+| 80% short-chat + 20% long (interactive-heavy) | 133..163 | gpu_hbm | 7.6 | 50ms | **1.00x** | 1.17x | 0.00/0.15 |
+| 100% prefill-heavy (long in, tiny out) — compute-bound | 5..6 | gpu_compute | 2.2 | 50ms | **1.00x** | 1.00x | 0.00/0.45 |
 
 ## 1 Grace/GPU, sparse 10%
-f=0 tok/s as a [conservative..optimistic] band (no-overlap..perfect overlap). **Offload gain shown for BOTH ends**: `gain@opt` (offload overlaps GPU) vs `gain@con` (no overlap, offloaded CPU attention on the latency path). SLO ≤ 50ms.
-| mix | f=0 [con..opt] | bind | B | TPOT | best f@opt | gain@opt | gain@con |
+f=0 tok/s as a [conservative..optimistic] band (no-overlap..perfect overlap). **The bankable number is `gain@con` (no overlap); `gain@opt` is the UPPER bound that REQUIRES a layer-ahead pipeline** — read it as upside, not as the result. `sparse` is applied to the GPU baseline too (apples-to-apples), so the gain isolates the offload effect, not a sparsity benefit denied to the baseline. SLO ≤ 50ms.
+| mix | f=0 [con..opt] | bind | B | TPOT | **gain@con (bankable)** | gain@opt (needs overlap) | best f@con/@opt |
 |---|---|---|---|---|---|---|---|
-| 100% long-agentic (Codex) | 47..53 | gpu_hbm | 2.7 | 50ms | 0.50 | 1.99x | 1.00x |
-| 70% long-agentic + 30% short-chat | 57..66 | gpu_hbm | 3.3 | 50ms | 0.50 | 1.99x | 1.00x |
-| 50% long + 30% mid-RAG + 20% short | 69..80 | gpu_hbm | 4.0 | 50ms | 0.50 | 1.99x | 1.00x |
-| 80% short-chat + 20% long (interactive-heavy) | 136..163 | gpu_hbm | 8.3 | 50ms | 0.50 | 1.97x | 1.00x |
-| 100% prefill-heavy (long in, tiny out) — compute-bound | 5..6 | gpu_compute | 2.3 | 50ms | 0.90 | 1.00x | 1.00x |
+| 100% long-agentic (Codex) | 62..73 | gpu_hbm | 2.7 | 37ms | **1.10x** | 2.48x | 0.35/0.60 |
+| 70% long-agentic + 30% short-chat | 77..90 | gpu_hbm | 3.3 | 37ms | **1.09x** | 2.47x | 0.35/0.60 |
+| 50% long + 30% mid-RAG + 20% short | 94..109 | gpu_hbm | 4.0 | 37ms | **1.09x** | 2.47x | 0.30/0.60 |
+| 80% short-chat + 20% long (interactive-heavy) | 184..221 | gpu_hbm | 8.3 | 38ms | **1.09x** | 2.42x | 0.30/0.60 |
+| 100% prefill-heavy (long in, tiny out) — compute-bound | 5..6 | gpu_compute | 2.3 | 37ms | **1.00x** | 1.00x | 0.00/1.00 |
 
 ## Reading it (the honest mechanism, corrected by the model)
-- **CPU attention is compute-heavy, not just bandwidth-heavy** (review fix): dense attention is ~L·S·d_attn FLOP/token (~178 ms/token at 68k on one weak Grace), which DOMINATES the KV-streaming term and makes the offloaded path compute-bound. Counting it (previously only decompress was) lowered the dense gain 1.18×→**1.05×** and sparse 3.0×→**2.0×**, and pushed the optimal f down — offload less, because each offloaded token is expensive on the CPU. This is why sparsity (or many CPUs) is mandatory.
+- **The headline gain is the BANKABLE `gain@con`, NOT `gain@opt`.** The perfect-overlap end (gain@opt: dense ≈1.05×, sparse ≈1.70×) sits at the loosest physically-permissible bound and REQUIRES a zero-interference ScoutAttention layer-ahead pipeline. Without that overlap, `gain@con ≈ 1.00×` for both dense and sparse under the 50ms SLO — i.e. **offloading core attention buys essentially nothing on this single-GPU interactive config unless you have the pipeline OR a loose SLO + sparsity + more CPUs.** Quantization (int4 KV) attacks the same HBM-capacity bottleneck more cheaply and often beats offload here.
+- **CPU attention is compute-heavy, not just bandwidth-heavy** (review fix): dense attention is ~L·S·d_attn FLOP/token (~178 ms/token at 68k on one weak Grace), which DOMINATES the KV-streaming term and makes the offloaded path compute-bound. Counting it (previously only decompress was) pushed the optimal f down — offload less, because each offloaded token is expensive on the CPU. This is why sparsity (or many CPUs) is mandatory.
+- **Sparse is applied to the GPU baseline too (apples-to-apples fix).** Earlier the ScoutAttention `sparse` discount scaled ONLY the offloaded CPU path while the f=0 baseline streamed full dense KV, over-crediting the sparse-row gain by ~1.17× (sparse opt-gain was ~1.99×; isolating the offload effect drops it to ~1.70×). Sparse now scales the GPU baseline's decode-attention read/FLOPs as well, so the reported gain is the offload/capacity benefit alone.
 - **The offload gain LIVES OR DIES by overlap (gain@opt vs gain@con).** The whole benefit assumes the CPU attention hides behind GPU work. With NO overlap it lands on the per-token critical path, blows the 50ms TPOT SLO, and forces B back down — so `gain@con ≈ 1.00×` even for sparse. The 1.05×/2.0× numbers REQUIRE a ScoutAttention-style layer-ahead pipeline (high ov). This is the single biggest honesty caveat, now in the model.
 - **Caveat on `gain@con ≈ 1.00×` (be honest that it is partly forced).** At ov=0 the offloaded CPU attention is added to BOTH the per-token TPOT (so it serializes onto the critical path) AND the call-rate path (so the slow dense CPU attention dominates Λ). With the f=0 baseline already pinned at the TPOT-SLO ceiling, ANY f>0 strictly shrinks the feasible batch, so `best_f` is essentially compelled to return f=0 / gain 1.0. This is a defensible physical consequence, not an independent discovery — it is forced by `conservative = offload fully serialized` + `baseline at the SLO`. The non-tautological check is the loose-SLO case below, where the baseline is NOT SLO-pinned and gain@con is free to move.
-- **A loose latency budget revives gain@con only for SPARSE offload.** Relax the TPOT SLO so B can grow: SPARSE offload recovers (≈1.04× at 1 Grace, ≈2.6× at 4 Grace) because the cheap CPU attention lets the freed-HBM capacity win; DENSE offload stays ≈1.00× even with an unbounded latency budget, because the serialized ~178ms/token CPU attention dominates the call rate regardless of B. (Before the rate-path overlap fix, dense appeared to revive too — an artifact of treating CPU/C2C as free, fully-overlapping rate servers even at ov=0.) So the real precondition is `high overlap OR (loose SLO AND sparse)`.
+- **A loose latency budget revives gain@con only for SPARSE offload WITH CPU AGGREGATION.** Relax the TPOT SLO so B can grow: at 1 Grace sparse offload still does NOT revive (gain@con = 1.00× — now that the GPU baseline is also sparse, its bandwidth saving cancels the offload's capacity edge on a single CPU); only with FastDecode-style aggregation (≈2.27× at 4 Graces) does the cheap CPU attention let the freed-HBM capacity win at the conservative end. DENSE offload stays ≈1.00× even with an unbounded latency budget, because the serialized ~178ms/token CPU attention dominates the call rate regardless of B. (Before the rate-path overlap fix, dense appeared to revive too — an artifact of treating CPU/C2C as free, fully-overlapping rate servers even at ov=0.) So the real precondition is `high overlap OR (loose SLO AND sparse)`.
 - **One shared f serves the whole concurrent mix.** The optimum is set by the most HBM-bound classes; the rest ride along.
 - **Offload helps iff GPU HBM binds at f=0 AND the CPU has headroom.** Two HBM channels are relieved: (a) bandwidth — KV streaming leaves HBM; (b) capacity→weight-amortization — freeing HBM grows the resident decode batch B, and a *dense* model reads ALL weights every step (∝1/B), so a bigger B cuts HBM/token even for short context. This is why even the short-chat and mid-RAG mixes still gain ~1.04–1.06× (dense).
 - **The genuine 'no help' regime is COMPUTE-bound, not short-context.** The prefill-heavy class (long input, tiny output) binds on GPU compute at f=0; offloading KV frees a resource that wasn't the bottleneck, so gain ≈ 1.00×. The model reports this correctly — that is the real boundary of the offload win, not context length per se.
 - Gain caps when HBM falls to the **GPU-compute floor** (e.g. tiny context tops out ~1.33×) or when **CPU DRAM bandwidth** becomes the new bottleneck (stock 0.5-Grace, dense — small feasible f).
-- **The overlap band is TIGHT exactly where we care.** For long-context (HBM dominates compute) the conservative/optimistic spread is ~10–15% (e.g. 47..53), so the offload conclusion is ROBUST to the overlap assumption. The band is wide (~2×) only for short/balanced context, where compute≈HBM and whether they overlap matters most — but that is the regime where offload helps least anyway.
+- **Two DIFFERENT bands — do not confuse them.** (a) The f=0 ABSOLUTE throughput band is tight for long context (~10–15%, e.g. 47..53), because HBM dominates compute so whether they overlap barely moves the baseline number. (b) The OFFLOAD GAIN band is NOT tight: it runs ~1.0× (gain@con) → ~1.05–1.70× (gain@opt), a ~50–100% spread, because the ENTIRE offload win depends on whether the CPU attention hides behind GPU work. **The gain is NOT robust to the overlap assumption** — earlier wording that called the conclusion 'robust' conflated the tight absolute-throughput band with the wide gain band, and was wrong about the number that matters. Trust `gain@con` as the floor; treat `gain@opt` as overlap-dependent upside.
 - **Now latency-aware:** the resident batch B is capped by BOTH HBM capacity AND a TPOT SLO (≤50ms); a real interactive engine cannot batch past the latency limit. At long context capacity binds first (B≈3, TPOT≈50ms); offload lifts B under the same latency budget.
 - Fluid model = perfect compute∥HBM overlap → **optimistic** end of the band; the discrete-event sim (sim/event_sim.py) remains the independent no-overlap cross-check.
 
@@ -54,7 +58,7 @@ f=0 tok/s as a [conservative..optimistic] band (no-overlap..perfect overlap). **
 - `fit_overlap(classes, model, hw, measured_tps)` bisects ov to match ONE measured co-execution throughput, collapsing the band to a single calibrated curve. If the measurement falls OUTSIDE [conservative, optimistic], it returns None — the honest signal that something other than compute/HBM overlap (admission stalls, kernel interference, a bandwidth model error) is responsible, not just the overlap knob.
 - This is the one remaining hook for real data: give me a prefill+decode co-run throughput on the target HW and the model stops being a bound and becomes a fitted prediction.
 ## Validation cross-checks (single-class long-agentic, 1 Grace, eta=0.5)
-- **Below roofline ceiling (physics):** serving_mix f=0 = 53 ≤ infinite-batch serving roofline 150 tok/s/GPU. ✅
+- **Below roofline ceiling (physics):** serving_mix f=0 = 53 ≤ infinite-batch serving roofline 147 tok/s/GPU. ✅
 - **Fluid ≥ serialized (overlap is an upper bound):** serving_mix 53 ≥ serving_2res 39 (the single-mean-call serialized model). ✅ — the concurrent model is the optimistic envelope; the truth sits between it and the no-overlap event sim.
 - **Reduces to the contention story:** single-class gains match `offload_verdict.md` (≈1.05× stock dense → ~3× sparse), so generalizing to a mix did not change the established direction — it only adds the cross-class trade-off and the compute-bound 'no-help' boundary.
 

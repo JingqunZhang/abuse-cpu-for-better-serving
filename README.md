@@ -11,6 +11,48 @@ the related-work map. **Current results live in `outputs/concurrent_mix.md`
 [Outputs map](#outputs-map-which-report-is-current) below for which report
 supersedes which.
 
+## Start here — the mental model (60 seconds)
+
+The model answers one question: **does moving KV (and a fraction of decode
+attention) to the CPU raise system output-tok/s — and if so, when?** Three ideas
+make every result readable:
+
+1. **It's a bottleneck ladder, not a single number.** Find what binds, relieve
+   it, repeat — until you hit the hard floor (GPU prefill compute). For
+   long-context dense LLM serving the *first* thing that binds is **HBM
+   capacity**: 70B weights eat ~140 GB, leaving room for only ~2–3 resident 64k
+   sessions, so the weight read is barely amortized. The levers that climb the
+   ladder, in order of leverage: **tensor-parallel (pool HBM) → sparse attention
+   → KV quantization (int4) → CPU offload.** On 2×GPU this takes Codex from ~100
+   to ~970 tok/s; at the top you're GPU-compute-bound and only more GPUs help.
+
+2. **Every gain is a `[conservative .. optimistic]` band**, set by one overlap
+   knob `ov` (how much the CPU's work hides behind the GPU's). `gain@con` (ov=0,
+   no overlap) is the **bankable floor**; `gain@opt` (ov=1, a ScoutAttention-style
+   layer-ahead pipeline) is the **upper bound that requires that pipeline**. A
+   bare call returns the conservative floor — we never headline the rosy end.
+   Read `gain@con` first; treat `gain@opt` as upside you must earn.
+
+3. **The CPU relieves CAPACITY (bytes), not COMPUTE (FLOPs).** Decode is
+   memory-bound, so the GPU's spare compute can't help; the CPU's value is being a
+   second, cheaper place to *store* KV. Its roles, ranked for a CPU-scarce node:
+   **(a) backing store for idle sessions** — park the 10.5s-idle sessions' KV in
+   CPU DRAM to admit more concurrent sessions; unconditional, needs no overlap,
+   the best use at a low CPU:GPU ratio. **(b) core-attention offload** — frees HBM
+   capacity for a bigger batch, but only bankable (no-overlap) at **≥~2 Grace/GPU**
+   and otherwise needs the layer-ahead pipeline; it competes with quantization,
+   which does the same capacity job without the CPU. **(c) full decode engine
+   (disaggregation)** — huge gains but needs ~32 Grace/GPU to balance the pipeline.
+
+> **Honest bottom line** (realistic Grace `f_cpu`≈14 TF peak, apples-to-apples
+> sparse baseline, 1 Grace/GPU): dense core-attention offload ≈**1.0× bankable /
+> ≈1.18× with overlap**; sparse-10% ≈**1.0–1.10× bankable / ≈2.5× with overlap**.
+> The win lives or dies by overlap (and by the CPU's *achievable* sparse-attention
+> FLOP/s — these use the bf16 peak, an upper bound), and **KV quantization often
+> beats offload outright** on this capacity-bound workload. (Hardened by three
+> rounds of adversarial multi-agent audit + a hardware-settings review; see
+> `outputs/model_revisions.md`.)
+
 ## Two offload architectures (don't confuse them)
 
 The repo models **two different ways** the CPU can help — they answer different
@@ -18,8 +60,11 @@ questions and give very different gains:
 
 - **Partial offload** (`scenario.py` / `concurrent.py`, model `serving_mix`): the
   GPU still does *all* prefill **and** decode, but hands a fraction `f` of the
-  *core-attention* KV to the CPU. Mild gain (NVL72 stock ≈ 1.0–2.0×, needs
-  sparsity + overlap); right for a single interactive node with a few CPUs.
+  *core-attention* KV to the CPU. Gain is a band: ≈**1.0× bankable** (no overlap)
+  up to ≈**1.18× dense / ≈2.5× sparse-10×** with a perfect layer-ahead pipeline,
+  on a 1-Grace GB200 (at the realistic CPU bf16 peak; irregular sparse kernels
+  realize less). Needs sparsity **and** overlap (≥~1 Grace/GPU makes sparse
+  bankable). Right for a single interactive node with a few CPUs.
 - **Full disaggregation** (`disagg.py`): the GPU does **only prefill**, a *pool*
   of CPUs does **only decode**, run as a pipeline. Large gain (≈ 13–34× over the
   admission-bound baseline) but needs **~32+ Grace-class CPUs per GPU**
@@ -148,11 +193,21 @@ pays off depends on two things, both now in the concurrent model:
 - **CPU attention sparsity.** Dense CPU attention is ~L·S·d_attn FLOP/token
   (~178 ms/token at 68k on one Grace) — compute-bound, not just bandwidth-bound;
   ScoutAttention-style sparse (~10%) is what makes offload viable.
-- **CPU/GPU overlap.** The offload gain *lives or dies by overlap*: with perfect
-  overlap the concurrent model shows ~**1.05× (dense) / ~2.0× (sparse 10%)** on a
-  1-Grace GB200 under a 50 ms TPOT SLO; with **no overlap the gain is ≈1.0×** (the
-  slow CPU attention lands on the per-token critical path). The headline numbers
-  require a layer-ahead pipeline **or** (a loose latency budget **and** sparsity).
+- **CPU/GPU overlap.** The offload gain *lives or dies by overlap*. The default
+  reported number is the **conservative** (no-overlap) floor; with **perfect
+  overlap** the concurrent model shows ~**1.18× (dense) / ~2.5× (sparse 10%)** on a
+  1-Grace GB200 under a 50 ms TPOT SLO (at the realistic CPU bf16 peak — an upper
+  bound; irregular sparse kernels realize less); with **no overlap the gain is
+  ≈1.0–1.1×** (the
+  slow CPU attention lands on the per-token critical path). The optimistic numbers
+  require a layer-ahead pipeline **or** (a loose latency budget **and** sparsity
+  **and** ≥~2 Grace/GPU). `sparse` is applied to the GPU baseline too, so the gain
+  isolates the offload effect — it is not a sparsity benefit denied to the baseline.
+
+`eta` caveat: the headline uses `eta=0.5`; the hardware-fit is ≈0.40, where the
+dense single-GPU baseline is SLO-infeasible (needs tensor-parallel first) — so
+`eta=0.5` is the more offload-favorable choice, not less. See
+`outputs/validation_vs_hardware.md`.
 
 ### The "短板 / weakest-link" rule, applied at three levels
 
@@ -177,14 +232,19 @@ Every throughput/gain is reported as a **band**, governed by one overlap knob
 
 | end | `ov` | meaning |
 |---|---|---|
-| **conservative** | 0 | offloaded CPU attention fully **serialized** onto the critical path (and the call rate) — a true no-overlap lower bound |
+| **conservative** *(default)* | 0 | offloaded CPU attention fully **serialized** onto the critical path (and the call rate) — a true no-overlap lower bound. `serving_mix`/`best_f` return this unless you ask otherwise |
 | **optimistic** | 1 | offloaded work **perfectly overlaps** GPU work (ScoutAttention layer-ahead pipeline) — the loosest upper bound |
 
-`serving_mix(..., overlap=ov)` takes a float in between; `fit_overlap(...,
+Both ends come from one primitive, `combine(a,b,ov) = a + b − ov·min(a,b)` (ov=0 →
+sum/serial, ov=1 → max/overlap), applied with the **same `ov`** to both the
+per-token TPOT (which caps the batch via the SLO) and the call-rate util-seconds
+(which caps Λ) — so the latency and throughput channels can't disagree about what
+overlaps. `serving_mix(..., overlap=ov)` takes a float in between; `fit_overlap(...,
 measured_tps)` bisects `ov` to match one measured co-execution point, collapsing
 the band into a single calibrated prediction (returns `None` if the measurement
 is outside the band — the honest signal that something other than overlap is off).
-The truth sits inside the band; we never hide behind the optimistic number.
+The truth sits inside the band; the default is the conservative floor, never the
+optimistic number.
 
 ## Glossary (canonical symbols)
 

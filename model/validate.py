@@ -60,7 +60,7 @@ def _model_from_point(point):
 
 
 def predict_tpot(point, eta=None, *, eta_compute=None, eta_mem=None,
-                 t_dispatch=0.0, overlap="optimistic"):
+                 t_dispatch=0.0, overlap="conservative"):
     """Model TPOT (s) for a measurement point.
 
     `eta` (shorthand) sets both compute & memory efficiency; or pass
@@ -114,7 +114,7 @@ def roofline_ok(point):
 # --------------------------------------------------------------------------
 # (2) Calibration: fit eta to measured points; report MAPE + leave-one-out CV
 # --------------------------------------------------------------------------
-def _mape(points, eta, overlap="optimistic"):
+def _mape(points, eta, overlap="conservative"):
     errs = []
     for p in points:
         pred = predict_tpot(p, eta, overlap=overlap)
@@ -122,7 +122,7 @@ def _mape(points, eta, overlap="optimistic"):
     return sum(errs) / len(errs) if errs else float("inf")
 
 
-def calibrate_eta(points, overlap="optimistic", grid=None):
+def calibrate_eta(points, overlap="conservative", grid=None):
     """Single-eta fit (robust headline): eta in (0,1] minimizing MAPE."""
     if grid is None:
         grid = [round(0.05 * k, 3) for k in range(1, 21)]   # 0.05 .. 1.0
@@ -135,7 +135,7 @@ ETA_GRID = [round(0.05 * k, 3) for k in range(2, 21)]          # 0.10 .. 1.0
 TD_GRID = [0.0, 0.5e-3, 1e-3, 2e-3, 3e-3, 5e-3, 8e-3, 12e-3]   # 0 .. 12 ms
 
 
-def _mape_params(points, ec, em, td, overlap="optimistic"):
+def _mape_params(points, ec, em, td, overlap="conservative"):
     errs = []
     for p in points:
         pred = predict_tpot(p, eta_compute=ec, eta_mem=em, t_dispatch=td,
@@ -144,7 +144,7 @@ def _mape_params(points, ec, em, td, overlap="optimistic"):
     return sum(errs) / len(errs) if errs else float("inf")
 
 
-def calibrate_joint(points, overlap="optimistic"):
+def calibrate_joint(points, overlap="conservative"):
     """Fit (eta_compute, eta_mem, t_dispatch) by grid search, minimizing MAPE.
 
     For decode-only points (memory-bound) eta_compute is weakly determined; we
@@ -165,7 +165,7 @@ def n_free_params_joint():
     return 3
 
 
-def leave_one_out(points, overlap="optimistic", joint=False):
+def leave_one_out(points, overlap="conservative", joint=False):
     """Held-out error. joint=False -> fit single eta on the others (robust with
     few points). joint=True -> fit (ec, em, td); only meaningful when
     len(points) > n_params+1, else returns None with a flag."""
@@ -219,7 +219,10 @@ def _synthetic_points(true_eta=0.6):
 def load_measurements():
     if os.path.exists(DATA):
         with open(DATA) as fh:
-            return json.load(fh)
+            pts = json.load(fh)
+        # Honor "_skip": true (points kept in the file for documentation but
+        # excluded from calibration -- e.g. the physically-mislabeled b32 anchor).
+        return [p for p in pts if not p.get("_skip")]
     return []
 
 ROOFLINE_CASES = [

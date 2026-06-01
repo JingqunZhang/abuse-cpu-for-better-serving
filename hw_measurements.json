@@ -8,8 +8,9 @@
     "b_d": 1, "context_tokens": 1024, "measured_tpot_ms": 11.0
   },
   {
-    "_comment": "Same model/HW, higher concurrency end of the reported single-stream ITL band (~21ms) -> larger effective decode batch. Source as above.",
-    "name": "llama8b_h100_b32_ctx1k",
+    "_comment": "REMOVED in the honesty revision (audit finding): the former 'llama8b_h100_b32_ctx1k' point labeled 21ms as a BATCH-32 TPOT. That is physically inconsistent -- a dense-8B batch-32 decode on H100 is weight-read-bound at ~5ms (16GB/3.35TB/s), so 21ms implies ~1524 tok/s, not a clean batch-32 roofline point. The 21ms figure is really the contended/high-concurrency upper end of the SINGLE-STREAM ITL band, not a batch-32 measurement. Keeping it mislabeled dragged the fitted eta artificially down to ~0.40. Dropped rather than mislabel; replace with a real, instrumented batch-sweep point when available.",
+    "name": "_removed_llama8b_h100_b32_ctx1k_see_comment",
+    "_skip": true,
     "model": {"name": "llama3_8b", "layers": 32, "hidden": 4096, "n_heads": 32,
               "n_kv_heads": 8, "head_dim": 128, "p_act": 8e9, "p_total": 8e9},
     "hw": {"gpu_flops": 9.9e14, "hbm_bw_tb_s": 3.35, "hbm_capacity_gb": 80},

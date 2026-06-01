@@ -203,11 +203,19 @@ def gpu_attn_time(pol: PolicyConfig, work: WorkloadConfig,
     Decode attention is memory-bound (stream KV once), but we take max() with
     the attention-FLOP roofline for symmetry with the CPU/append terms -- it
     only bites at large batch / short context.
+
+    APPLES-TO-APPLES sparsity (audit fix): `pol.sparse` scales the GPU's OWN
+    decode attention too, not just the offloaded CPU path. When the attention
+    algorithm is block-sparse, the GPU reads only `sparse` of the context per
+    token as well; previously this term ignored pol.sparse, so the f=0 baseline
+    was denied the discount the offload path got, inflating the legacy sparse
+    optimize_f gain (~1.86x vs the fair ~1.76x). concurrent.py already does this.
     """
     share = (1.0 - pol.f) * pol.b_d
-    mem = share * kv_size(work.s_context, model) / hw.bw_hbm
-    flops = coeffs.gamma * share * model.layers * work.s_context * model.d_attn
-    decomp = share * kv_elems(work.s_context, model) * model.kv_decompress_flops
+    s = pol.sparse
+    mem = share * s * kv_size(work.s_context, model) / hw.bw_hbm
+    flops = coeffs.gamma * share * s * model.layers * work.s_context * model.d_attn
+    decomp = share * s * kv_elems(work.s_context, model) * model.kv_decompress_flops
     return max(mem, (flops + decomp) / hw.f_gpu)
 
 
